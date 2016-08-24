@@ -18,6 +18,7 @@
 #include <sstream>
 #include <vector>
 #include "mbed-trace/mbed_trace.h"
+#include "mbed_stats.h"
 
 #include "security.h"
 
@@ -190,7 +191,7 @@ public:
         btn_res->set_operation(M2MBase::GET_ALLOWED);
         // set initial value (all values in mbed Client are buffers)
         // to be able to read this data easily in the Connector console, we'll use a string
-        btn_res->set_value((uint8_t*)"0", 1);        
+        btn_res->set_value((uint8_t*)"0", 1);
     }
 
     ~ButtonResource() {
@@ -207,6 +208,8 @@ public:
     void handle_button_click() {
         M2MObjectInstance* inst = btn_object->object_instance();
         M2MResource* res = inst->resource("5501");
+        // Uhoh, a memory leak on button presses
+        malloc(1024);
 
         // up counter
         counter++;
@@ -225,6 +228,69 @@ private:
     M2MObject* btn_object;
     uint16_t counter;
 };
+
+/*
+ * The device resource contains device specific metrics
+ */
+class DeviceResource {
+public:
+    DeviceResource() {
+        // create ObjectID with metadata tag of '3', which is 'device'
+        device_object = M2MInterfaceFactory::create_object("3");
+        M2MObjectInstance* instance = device_object->create_object_instance();
+        // create resource with ID '11000' which is custom
+        M2MResource* res_max_heap = instance->create_dynamic_resource("11000", "MaxHeap",
+            M2MResourceInstance::INTEGER, true /* observable */);
+        // we can read this value
+        res_max_heap->set_operation(M2MBase::GET_POST_ALLOWED);
+        res_max_heap->set_execute_function(execute_callback(this, &DeviceResource::update_heap_max));
+        // Set the initial value
+        update_heap_max(NULL);
+
+        M2MResource* res_cur_heap = instance->create_dynamic_resource("11001", "CurrentHeap",
+            M2MResourceInstance::INTEGER, true /* observable */);
+        // we can read this value
+        res_cur_heap->set_operation(M2MBase::GET_POST_ALLOWED);
+        res_cur_heap->set_execute_function(execute_callback(this, &DeviceResource::update_heap_cur));
+        // Set the initial value
+        update_heap_cur(NULL);
+    }
+
+    ~DeviceResource() {
+    }
+
+    M2MObject* get_object() {
+        return device_object;
+    }
+
+    void update_heap_max(void*) {
+        M2MObjectInstance* inst = device_object->object_instance();
+        M2MResource* res = inst->resource("11000");
+
+        // serialize the value of counter as a string, and tell connector
+        char buffer[20];
+        mbed_stats_heap_t stats;
+        mbed_stats_heap_get(&stats);
+        int size = sprintf(buffer,"%lu",stats.max_size);
+        res->set_value((uint8_t*)buffer, size);
+    }
+
+    void update_heap_cur(void*) {
+        M2MObjectInstance* inst = device_object->object_instance();
+        M2MResource* res = inst->resource("11001");
+
+        // serialize the value of counter as a string, and tell connector
+        char buffer[20];
+        mbed_stats_heap_t stats;
+        mbed_stats_heap_get(&stats);
+        int size = sprintf(buffer,"%lu",stats.current_size);
+        res->set_value((uint8_t*)buffer, size);
+    }
+
+private:
+    M2MObject* device_object;
+};
+
 
 // Network interaction must be performed outside of interrupt context
 Semaphore updates(0);
@@ -316,6 +382,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     // we create our button and LED resources
     ButtonResource button_resource;
     LedResource led_resource;
+    DeviceResource device_resource;
 
 #ifdef TARGET_K64F
     // On press of SW3 button on K64F board, example application
@@ -344,6 +411,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     object_list.push_back(device_object);
     object_list.push_back(button_resource.get_object());
     object_list.push_back(led_resource.get_object());
+    object_list.push_back(device_resource.get_object());
 
     // Set endpoint registration object
     mbed_client.set_register_object(register_object);
