@@ -19,14 +19,21 @@
         "wifi-rx": {
             "help": "RX pin for serial connection to external device",
             "value": "D0"
-        }
+        },
+        "security-mode": "NONE"
     },
     "macros": ["MBEDTLS_USER_CONFIG_FILE=\"mbedtls_mbed_client_config.h\""],
     "target_overrides": {
         "*": {
-            "target.features_add": ["CLIENT", "COMMON_PAL"],
+            "target.features_add": ["CLIENT", "COMMON_PAL", "IPV6"],
             "mbed-client.reconnection-count": 3,
-            "mbed-client.reconnection-interval": 5
+            "mbed-client.reconnection-interval": 5,
+            "mbed-mesh-api.6lowpan-nd-channel-page": 0,
+            "mbed-mesh-api.6lowpan-nd-channel": 12,
+            "mbed-mesh-api.6lowpan-nd-channel-mask": "(1<<12)",
+            "mbed-mesh-api.thread-config-panid": "0xDEFA",
+            "mbed-mesh-api.thread-config-channel": 12,
+            "mbed-trace.enable": true
         },
         "NUCLEO_F401RE": {
             "wifi-tx": "PA_11",
