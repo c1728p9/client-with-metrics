@@ -19,6 +19,7 @@
 #include <vector>
 #include "mbed-trace/mbed_trace.h"
 #include "mbed_stats.h"
+#include "cmsis_os.h"
 
 #include "security.h"
 
@@ -254,6 +255,14 @@ public:
         res_cur_heap->set_execute_function(execute_callback(this, &DeviceResource::update_heap_cur));
         // Set the initial value
         update_heap_cur(NULL);
+
+        M2MResource* res_stack_usage = instance->create_dynamic_resource("11002", "StackInfo",
+            M2MResourceInstance::INTEGER, true /* observable */);
+        // we can read this value
+        res_stack_usage->set_operation(M2MBase::GET_POST_ALLOWED);
+        res_stack_usage->set_execute_function(execute_callback(this, &DeviceResource::update_stack_info));
+        // Set the initial value
+        update_stack_info(NULL);
     }
 
     ~DeviceResource() {
@@ -285,6 +294,70 @@ public:
         mbed_stats_heap_get(&stats);
         int size = sprintf(buffer,"%lu",stats.current_size);
         res->set_value((uint8_t*)buffer, size);
+    }
+
+    void update_stack_info(void*) {
+        M2MObjectInstance* inst = device_object->object_instance();
+        M2MResource* res = inst->resource("11002");
+        const int buf_size = 1024;
+        char* buffer = new char[buf_size];
+        memset(buffer, 0, buf_size);
+
+        char* pos = buffer;
+        int size_left = buf_size;
+        int size_written = snprintf(pos, size_left, "Stack info:\r\n");
+        if (size_written > 0) {
+            size_left -= size_written;
+            pos += size_written;
+        }
+
+        osThreadEnumId enum_id = osThreadsEnumStart();
+        while (true) {
+            osEvent info;
+            osThreadId thread_id = osThreadEnumNext(enum_id);
+            if (NULL == thread_id) {
+                // End of enumeration
+                break;
+            }
+            info = osThreadGetInfo(thread_id, osThreadInfoEntry);
+            if (info.status != osOK) {
+                continue;
+            }
+            void *entry = (void*)info.value.p;
+            // Mask off thumb bit to make reading
+            // the map file easier
+            entry = (void*)((uint32_t)entry & ~1);
+            info = osThreadGetInfo(thread_id, osThreadInfoArg);
+            if (info.status != osOK) {
+                continue;
+            }
+            void *arg = (void*)info.value.p;
+            info = osThreadGetInfo(thread_id, osThreadInfoStackSize);
+            if (info.status != osOK) {
+                continue;
+            }
+            uint32_t stack_size = (uint32_t)info.value.v;
+            info = osThreadGetInfo(thread_id, osThreadInfoStackMax);
+            if (info.status != osOK) {
+                continue;
+            }
+            uint32_t max_stack = (uint32_t)info.value.v;
+            size_written = snprintf(pos, size_left, "tsk %p arg %p using %lu / %lu\r\n", entry, arg, max_stack, stack_size);
+            if (size_written < 0) {
+                // Error
+                break;
+            }
+            if (size_written >= size_left) {
+                // Buffer full
+                break;
+            }
+            size_left -= size_written;
+            pos += size_written;
+        }
+        osThreadEnumFree(enum_id);
+
+        res->set_value((uint8_t*)buffer, pos - buffer);
+        delete[] buffer;
     }
 
 private:
