@@ -18,6 +18,7 @@
 #include <sstream>
 #include <vector>
 #include "mbed-trace/mbed_trace.h"
+#include "mbedtls/entropy_poll.h"
 #include "mbed_stats.h"
 
 #include "security.h"
