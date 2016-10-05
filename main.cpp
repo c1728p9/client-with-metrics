@@ -20,6 +20,7 @@
 #include "mbed-trace/mbed_trace.h"
 #include "mbedtls/entropy_poll.h"
 #include "mbed_stats.h"
+#include "CameraOV528.h"
 
 #include "security.h"
 
@@ -58,6 +59,7 @@ ThreadInterface mesh;
 #endif
 
 Serial output(USBTX, USBRX);
+CameraOV528 camera(A3, A2);
 
 // These are example resource values for the Device Object
 struct MbedClientDevice device = {
@@ -292,6 +294,51 @@ private:
     M2MObject* device_object;
 };
 
+/*
+ * The device resource contains device specific metrics
+ */
+class CameraResource {
+public:
+    CameraResource() {
+        // create ObjectID with metadata tag of '3', which is 'device'
+        device_object = M2MInterfaceFactory::create_object("3");
+        M2MObjectInstance* instance = device_object->create_object_instance();
+        // create resource with ID '11002' which is custom
+        M2MResource* res_picture = instance->create_dynamic_resource("11002", "picture",
+            M2MResourceInstance::INTEGER, true /* observable */);
+        // we can read this value
+        res_picture->set_operation(M2MBase::GET_POST_ALLOWED);
+        res_picture->set_execute_function(execute_callback(this, &CameraResource::update_picture));
+        // Set the initial value
+        update_picture(NULL);
+
+    }
+
+    ~CameraResource() {
+    }
+
+    M2MObject* get_object() {
+        return device_object;
+    }
+
+    void update_picture(void*) {
+        M2MObjectInstance* inst = device_object->object_instance();
+        M2MResource* res = inst->resource("11002");
+
+        camera.set_resolution(CameraOV528::RES_160x120);
+        camera.take_picture();
+        uint32_t pic_size = camera.get_picture_size();
+        uint8_t *pic_buf = new uint8_t[pic_size];
+        camera.read_picture_data(pic_buf, pic_size);
+        res->set_value(pic_buf, pic_size);
+        delete pic_buf;
+    }
+
+
+private:
+    M2MObject* device_object;
+};
+
 
 // Network interaction must be performed outside of interrupt context
 Semaphore updates(0);
@@ -384,6 +431,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     ButtonResource button_resource;
     LedResource led_resource;
     DeviceResource device_resource;
+    CameraResource camera_resource;
 
 #ifdef TARGET_K64F
     // On press of SW3 button on K64F board, example application
@@ -413,6 +461,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     object_list.push_back(button_resource.get_object());
     object_list.push_back(led_resource.get_object());
     object_list.push_back(device_resource.get_object());
+    object_list.push_back(camera_resource.get_object());
 
     // Set endpoint registration object
     mbed_client.set_register_object(register_object);
